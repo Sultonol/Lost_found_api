@@ -1,11 +1,12 @@
 <?php
 
-use App\Http\Controllers\Api\ItemController;
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\ClaimController;
-use App\Http\Controllers\Api\MessageController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ItemController;
+use App\Http\Controllers\Api\ClaimController;
+use App\Http\Controllers\Api\MessageController;
+use App\Http\Controllers\Api\CategoryController;
 
 /*
 |--------------------------------------------------------------------------
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
+Route::get('/categories', [CategoryController::class, 'index']);
 
 
 Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])

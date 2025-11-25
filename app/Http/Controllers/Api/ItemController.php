@@ -52,7 +52,11 @@ class ItemController extends Controller
             'image_url' => $path ? asset('storage/' . $path) : null,
         ]);
 
-        return response()->json($item, 201);
+        return response()->json([
+            'succces' => true,
+            'message' => 'Laporan berhasil dibuat',
+            'data' => $item
+        ], 201);
     }
 
     public function show(Item $item)
