@@ -38,14 +38,27 @@ Route::middleware('auth:sanctum')->group(function(){
 
     Route::apiResource('items', ItemController::class);
 
-    // --- PERBAIKAN DI SINI ---
-    // Route spesifik ('incoming') HARUS DI ATAS route dynamic ('{id}' dari apiResource)
+    // ============================================================
+    // ROUTE KHUSUS CLAIMS (WAJIB DI ATAS apiResource)
+    // ============================================================
+
+    // 1. Route untuk PENCARI melihat daftar klaim yg diajukan (Status ACC/Tolak)
+    Route::get('claims/my-submitted', [ClaimController::class, 'getMySubmittedClaims']);
+
+    // 2. Route untuk PENEMU melihat permintaan masuk (Notifikasi)
     Route::get('claims/incoming', [ClaimController::class, 'getIncomingClaims']);
+
+    // Route legacy (bisa dihapus jika tidak dipakai, atau biarkan saja)
     Route::get('/my-claims', [ClaimController::class, 'index']);
 
-    // apiResource ini menangkap '/claims/{id}', jadi taruh di bawah
+    // ============================================================
+    // ROUTE DYNAMIC (MENANGKAP ID) - TARUH DI BAWAH
+    // ============================================================
+    // Route ini menangkap /claims/{id}. Jika ditaruh di atas, kata 'incoming'
+    // akan dianggap sebagai {id}, makanya error.
     Route::apiResource('claims', ClaimController::class)->except(['index', 'destroy']);
 
+    // Route Chat
     Route::get('/claims/{claim}/messages', [MessageController::class, 'index']);
     Route::post('/claims/{claim}/messages', [MessageController::class, 'store']);
 });

@@ -11,20 +11,47 @@ use Illuminate\Validation\Rule;
 
 class ClaimController extends Controller
 {
-    // 1. GET ALL CLAIMS (My Claims & Incoming) - Optional usage
-    public function index(Request $request)
+    // =========================================================================
+    // 1. LIHAT KLAIM YANG SAYA AJUKAN (Untuk PENCARI / CLAIMER) - [BARU]
+    // =========================================================================
+    // Endpoint ini dipakai agar Pencari tau apakah klaimnya diterima/ditolak
+    // dan memunculkan tombol "Chat Penemu" jika diterima.
+    public function getMySubmittedClaims(Request $request)
     {
         $user = $request->user();
-        $claims = Claim::where('claimer_id', $user->id)
-                      ->orWhere('finder_id', $user->id)
-                      ->with(['item.user', 'item.category', 'claimer', 'finder'])
-                      ->latest()
-                      ->paginate(10);
 
-        return response()->json($claims);
+        $claims = Claim::where('claimer_id', $user->id)
+                      ->with(['item.user', 'finder']) // Load data barang & penemu
+                      ->latest()
+                      ->get();
+
+        return response()->json(['data' => $claims]);
     }
 
-    // 2. CREATE CLAIM
+    // =========================================================================
+    // 2. LIHAT PERMINTAAN KLAIM MASUK (Untuk PENEMU / FINDER) - [DIPERBAIKI]
+    // =========================================================================
+    // Endpoint ini untuk notifikasi ada yang minta barang kita.
+    public function getIncomingClaims(Request $request)
+    {
+        $user = $request->user();
+
+        $claims = Claim::where('finder_id', $user->id)
+            // --- PERBAIKAN UTAMA DI SINI ---
+            // Ambil status 'pending' (belum diproses) DAN 'approved' (sudah deal)
+            // Tujuannya: Agar kartu tidak hilang setelah di-ACC, tapi tombolnya
+            // berubah jadi tombol Chat.
+            ->whereIn('status', ['pending', 'approved'])
+            ->with(['item', 'claimer'])
+            ->latest()
+            ->get();
+
+        return response()->json(['data' => $claims]);
+    }
+
+    // =========================================================================
+    // 3. BUAT KLAIM BARU
+    // =========================================================================
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -38,43 +65,68 @@ class ClaimController extends Controller
         $item = Item::find($request->item_id);
         $user = auth()->user();
 
-        // Validasi
         if ($item->user_id == $user->id) {
             return response()->json(['message' => 'Anda tidak bisa mengklaim barang Anda sendiri.'], 403);
         }
         if ($item->report_type->value != 'ditemukan') {
              return response()->json(['message' => 'Hanya laporan barang ditemukan yang bisa diklaim.'], 400);
         }
-
-        // Cek status item
         if ($item->status == 'claimed') {
-            $activeClaim = Claim::where('item_id', $item->id)->where('status', 'pending')->first();
-            $claimerName = $activeClaim ? $activeClaim->claimer->name : 'pengguna lain';
-            return response()->json(['message' => "Barang ini sedang dalam proses klaim oleh {$claimerName}."], 409);
+            return response()->json(['message' => "Barang ini sedang dalam proses klaim."], 409);
         } elseif ($item->status == 'closed') {
             return response()->json(['message' => 'Laporan barang ini sudah ditutup.'], 409);
-        } elseif ($item->status->value != 'open') {
-             return response()->json(['message' => 'Barang ini tidak bisa diklaim saat ini.'], 409);
         }
 
-        // Buat Claim
         $claim = Claim::create([
             'item_id' => $item->id,
             'claimer_id' => $user->id,
-            'finder_id' => $item->user_id, // Pastikan ini terisi!
+            'finder_id' => $item->user_id,
             'status' => 'pending',
         ]);
 
-        // Update status barang jadi 'claimed'
         $item->update(['status' => 'claimed']);
 
         return response()->json([
-            'message' => 'Klaim berhasil dibuat. Penemu barang akan segera dihubungi.',
+            'message' => 'Klaim berhasil dibuat.',
             'claim' => $claim->load(['item', 'claimer', 'finder'])
         ], 201);
     }
 
-    // 3. SHOW DETAIL
+    // =========================================================================
+    // 4. UPDATE STATUS (TERIMA / TOLAK)
+    // =========================================================================
+    public function update(Request $request, Claim $claim)
+    {
+        if (auth()->id() !== $claim->finder_id) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $validated = $request->validate([
+            'status' => ['required', Rule::in(['approved', 'rejected'])],
+        ]);
+
+        $item = $claim->item;
+
+        if ($validated['status'] == 'approved') {
+            // Jika diterima, biarkan status item tetap 'claimed' atau ubah ke 'closed'
+            // tergantung alur. Untuk fitur chat, biarkan 'claimed' dulu agar
+            // pencari masih bisa akses itemnya.
+        } else {
+            // Jika ditolak, barang kembali OPEN agar bisa diklaim orang lain
+            $item->update(['status' => 'open']);
+        }
+
+        $claim->update(['status' => $validated['status']]);
+
+        return response()->json([
+            'message' => 'Status klaim diperbarui',
+            'claim' => $claim->fresh()->load(['item', 'claimer', 'finder'])
+        ]);
+    }
+
+    // =========================================================================
+    // 5. DETAIL & DELETE & INDEX
+    // =========================================================================
     public function show(Claim $claim)
     {
          if (auth()->id() !== $claim->claimer_id && auth()->id() !== $claim->finder_id) {
@@ -83,61 +135,13 @@ class ClaimController extends Controller
          return $claim->load(['item.user', 'item.category', 'claimer', 'finder']);
     }
 
-    // 4. UPDATE STATUS (Approve / Reject)
-    public function update(Request $request, Claim $claim)
-    {
-        if (auth()->id() !== $claim->finder_id) {
-            return response()->json(['message' => 'Hanya penemu barang yang bisa menyetujui/menolak klaim.'], 403);
-        }
-
-        $validated = $request->validate([
-            'status' => ['required', Rule::in(['approved', 'rejected'])],
-        ]);
-
-        if ($claim->status->value != 'pending') {
-            return response()->json(['message' => 'Klaim ini sudah diselesaikan sebelumnya.'], 409);
-        }
-
-        $item = $claim->item;
-        $message = '';
-
-        if ($validated['status'] == 'approved') {
-            $item->update(['status' => 'closed']);
-            $message = 'Klaim telah disetujui.';
-        } else {
-            $item->update(['status' => 'open']);
-            $message = 'Klaim telah ditolak.';
-        }
-
-        $claim->update(['status' => $validated['status']]);
-
-        return response()->json([
-            'message' => $message,
-            'claim' => $claim->fresh()->load(['item', 'claimer', 'finder'])
-        ]);
-    }
-
-    // 5. DELETE
     public function destroy(Claim $claim)
     {
         return response()->json(null, 404);
     }
 
-    // 6. GET INCOMING CLAIMS (Notifikasi untuk Penemu)
-    // --- INI BAGIAN YANG TADI ERROR ---
-    public function getIncomingClaims(Request $request)
+    public function index(Request $request)
     {
-        $user = $request->user();
-
-        // Perhatikan variabel ini namanya $claims (pakai 's' karena jamak/banyak)
-        $claims = Claim::where('finder_id', $user->id)
-            ->where('status', 'pending')
-            ->with(['item', 'claimer'])
-            ->latest()
-            ->get();
-
-        // YANG BENAR: return ['data' => $claims]
-        // KESALAHAN TADI: return ['data' => $claim] <- kurang 's'
-        return response()->json(['data' => $claims]);
+        return $this->getMySubmittedClaims($request);
     }
 }
