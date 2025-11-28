@@ -38,10 +38,14 @@ Route::middleware('auth:sanctum')->group(function(){
 
     Route::apiResource('items', ItemController::class);
 
+    // --- PERBAIKAN DI SINI ---
+    // Route spesifik ('incoming') HARUS DI ATAS route dynamic ('{id}' dari apiResource)
+    Route::get('claims/incoming', [ClaimController::class, 'getIncomingClaims']);
     Route::get('/my-claims', [ClaimController::class, 'index']);
+
+    // apiResource ini menangkap '/claims/{id}', jadi taruh di bawah
     Route::apiResource('claims', ClaimController::class)->except(['index', 'destroy']);
 
     Route::get('/claims/{claim}/messages', [MessageController::class, 'index']);
     Route::post('/claims/{claim}/messages', [MessageController::class, 'store']);
 });
-
