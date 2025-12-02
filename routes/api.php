@@ -45,4 +45,5 @@ Route::middleware('auth:sanctum')->group(function(){
     // Route Chat
     Route::get('/claims/{claim}/messages', [MessageController::class, 'index']);
     Route::post('/claims/{claim}/messages', [MessageController::class, 'store']);
+    Route::post('/profile/update', [AuthController::class, 'updateProfile']);
 });

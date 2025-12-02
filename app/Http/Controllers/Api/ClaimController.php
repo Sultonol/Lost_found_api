@@ -11,36 +11,23 @@ use Illuminate\Validation\Rule;
 
 class ClaimController extends Controller
 {
-    // =========================================================================
-    // 1. LIHAT KLAIM YANG SAYA AJUKAN (Untuk PENCARI / CLAIMER) - [BARU]
-    // =========================================================================
-    // Endpoint ini dipakai agar Pencari tau apakah klaimnya diterima/ditolak
-    // dan memunculkan tombol "Chat Penemu" jika diterima.
     public function getMySubmittedClaims(Request $request)
     {
         $user = $request->user();
 
         $claims = Claim::where('claimer_id', $user->id)
-                      ->with(['item.user', 'finder']) // Load data barang & penemu
+                      ->with(['item.user', 'finder'])
                       ->latest()
                       ->get();
 
         return response()->json(['data' => $claims]);
     }
 
-    // =========================================================================
-    // 2. LIHAT PERMINTAAN KLAIM MASUK (Untuk PENEMU / FINDER) - [DIPERBAIKI]
-    // =========================================================================
-    // Endpoint ini untuk notifikasi ada yang minta barang kita.
     public function getIncomingClaims(Request $request)
     {
         $user = $request->user();
 
         $claims = Claim::where('finder_id', $user->id)
-            // --- PERBAIKAN UTAMA DI SINI ---
-            // Ambil status 'pending' (belum diproses) DAN 'approved' (sudah deal)
-            // Tujuannya: Agar kartu tidak hilang setelah di-ACC, tapi tombolnya
-            // berubah jadi tombol Chat.
             ->whereIn('status', ['pending', 'approved'])
             ->with(['item', 'claimer'])
             ->latest()
@@ -49,9 +36,6 @@ class ClaimController extends Controller
         return response()->json(['data' => $claims]);
     }
 
-    // =========================================================================
-    // 3. BUAT KLAIM BARU
-    // =========================================================================
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -71,10 +55,12 @@ class ClaimController extends Controller
         if ($item->report_type->value != 'ditemukan') {
              return response()->json(['message' => 'Hanya laporan barang ditemukan yang bisa diklaim.'], 400);
         }
+
+        // Cek apakah barang sudah closed atau claimed
         if ($item->status == 'claimed') {
             return response()->json(['message' => "Barang ini sedang dalam proses klaim."], 409);
         } elseif ($item->status == 'closed') {
-            return response()->json(['message' => 'Laporan barang ini sudah ditutup.'], 409);
+            return response()->json(['message' => 'Laporan barang ini sudah ditutup/selesai.'], 409);
         }
 
         $claim = Claim::create([
@@ -84,6 +70,7 @@ class ClaimController extends Controller
             'status' => 'pending',
         ]);
 
+        // Saat klaim dibuat, status barang jadi 'claimed' (agar tidak bisa diklaim orang lain dulu)
         $item->update(['status' => 'claimed']);
 
         return response()->json([
@@ -92,9 +79,6 @@ class ClaimController extends Controller
         ], 201);
     }
 
-    // =========================================================================
-    // 4. UPDATE STATUS (TERIMA / TOLAK)
-    // =========================================================================
     public function update(Request $request, Claim $claim)
     {
         if (auth()->id() !== $claim->finder_id) {
@@ -108,11 +92,13 @@ class ClaimController extends Controller
         $item = $claim->item;
 
         if ($validated['status'] == 'approved') {
-            // Jika diterima, biarkan status item tetap 'claimed' atau ubah ke 'closed'
-            // tergantung alur. Untuk fitur chat, biarkan 'claimed' dulu agar
-            // pencari masih bisa akses itemnya.
+            // --- PERBAIKAN DI SINI ---
+            // Jika klaim DISETUJUI (Approved), ubah status barang jadi 'closed'
+            // Ini akan membuat label di frontend berubah menjadi 'Selesai' atau hilang dari list 'Tersedia'
+            $item->update(['status' => 'closed']);
         } else {
-            // Jika ditolak, barang kembali OPEN agar bisa diklaim orang lain
+            // Jika klaim DITOLAK (Rejected), kembalikan status barang jadi 'open'
+            // Agar bisa diklaim oleh orang lain lagi
             $item->update(['status' => 'open']);
         }
 
@@ -124,9 +110,6 @@ class ClaimController extends Controller
         ]);
     }
 
-    // =========================================================================
-    // 5. DETAIL & DELETE & INDEX
-    // =========================================================================
     public function show(Claim $claim)
     {
          if (auth()->id() !== $claim->claimer_id && auth()->id() !== $claim->finder_id) {

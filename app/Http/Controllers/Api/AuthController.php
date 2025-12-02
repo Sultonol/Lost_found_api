@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Auth\Events\Verified;
+use Illuminate\Support\Facades\Storage;
 
 class AuthController extends Controller
 {
@@ -125,5 +126,38 @@ class AuthController extends Controller
         }
 
         return response()->json(['message' => 'Email berhasil diverifikasi! Anda sekarang bisa login.']);
+    }
+
+    function updateProfil(Request $request){
+        $user = Auth::user();
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'email' => ['required', 'email', Rule::unique('users')->ignore($user->id)],
+            'avatar' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+        ]);
+
+        if($validator->fails){
+            return response()->json($validator->errors(), 422);
+        }
+
+        if ($request->hasFile('avatar')) {
+            if ($user->avatar_url) {
+                $oldPath = str_replace(url('storage/'), '', $user->avatar_url);
+                Storage::disk('public')->delete($oldPath);
+            }
+
+            $file = $request->file('avatar');
+            $path = $file->store('avatars', 'public');
+            $user->avatar_url = url('storage/' . $path);
+        }
+
+        $user->name = $request->name;
+        $user->email = $request->email;
+
+        $user->save();
+        return response()->json([
+            'message' => 'Profil berhasil diperbarui',
+            'user' => $usser
+        ]);
     }
 }
